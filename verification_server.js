@@ -40,11 +40,11 @@ app.use(cors());
 app.use(express.json());
 
 // ---------------------------------------------------------------------------
-// CONFIG - apni Firebase service account key yahan dalo
+// CONFIG - Firebase service account ab environment variable se aayega
+// (Render/Railway ke "Variables" section mein FIREBASE_SERVICE_ACCOUNT
+// naam se poori JSON paste karni hai - file upload nahi karni)
 // ---------------------------------------------------------------------------
-// Firebase Console -> Project Settings -> Service Accounts -> Generate new key
-// us JSON file ko serviceAccountKey.json naam se isi folder mein rakho
-const serviceAccount = require('./serviceAccountKey.json');
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
