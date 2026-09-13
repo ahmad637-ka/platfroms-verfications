@@ -1,0 +1,20 @@
+{
+  "name": "social-follower-verification",
+  "version": "1.0.0",
+  "description": "Verifies YouTube/TikTok/Instagram follower counts and generates referral promo codes",
+  "main": "verification_server.js",
+  "scripts": {
+    "start": "node verification_server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5",
+    "firebase-admin": "^12.1.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "playwright": "^1.44.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
