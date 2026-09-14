@@ -165,21 +165,55 @@ async function scrapeTiktok(page, url) {
 // ---------------------------------------------------------------------------
 // SCRAPER: Instagram follower count
 // ---------------------------------------------------------------------------
-// NOTE: Instagram often shows a login wall to automated browsers.
-// This works best-effort only and may frequently fail - warn the admin.
+// NOTE: Instagram ki normal webpage logged-out visitors ko jaan-boojh kar
+// galat/randomized follower numbers dikhati hai. Isliye humein unka internal
+// JSON data endpoint use karna hai (jo unka khud ka web-app use karta hai) -
+// ye zyada accurate hota hai. Bilkul free hai, koi API key nahi chahiye.
+// Fir bhi 100% guarantee nahi hai - Instagram kabhi bhi is endpoint ko
+// block/change kar sakta hai.
 async function scrapeInstagram(page, url) {
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(3000);
+  const usernameMatch = url.match(/instagram\.com\/([a-zA-Z0-9_.]+)/);
+  if (!usernameMatch) return 0;
+  const username = usernameMatch[1];
 
-  const text = await page.evaluate(() => {
-    const metaTag = document.querySelector('meta[property="og:description"]');
-    return metaTag ? metaTag.content : null;
-  });
+  try {
+    // Instagram ka internal API endpoint - unke apne web app ka backend
+    const response = await page.request.get(
+      `https://i.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
+      {
+        headers: {
+          'x-ig-app-id': '936619743392459', // Instagram web client ki public constant ID
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+        },
+      }
+    );
 
-  // og:description format usually: "1.2M Followers, 340 Following, 89 Posts..."
-  if (!text) return 0;
-  const match = text.match(/([\d.,]+[KM]?)\s*Followers/i);
-  return match ? parseCount(match[1]) : 0;
+    if (response.ok()) {
+      const data = await response.json();
+      const count = data?.data?.user?.edge_followed_by?.count;
+      if (count) return count;
+    }
+  } catch (err) {
+    console.log('Instagram JSON endpoint fail hua, purani method try kar rahe hain:', err.message);
+  }
+
+  // ===== FALLBACK: agar upar wala fail ho jaye, purani webpage scraping try karo =====
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    await page.waitForTimeout(3000);
+
+    const text = await page.evaluate(() => {
+      const metaTag = document.querySelector('meta[property="og:description"]');
+      return metaTag ? metaTag.content : null;
+    });
+
+    if (!text) return 0;
+    const match = text.match(/([\d.,]+[KM]?)\s*Followers/i);
+    return match ? parseCount(match[1]) : 0;
+  } catch (err) {
+    return 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
