@@ -54,6 +54,56 @@ admin.initializeApp({
 const db = admin.database();
 
 // ---------------------------------------------------------------------------
+// YOUTUBE: Official YouTube Data API use karte hain (scraping ki jagah)
+// Ye zyada reliable hai kyunki Google khud data deta hai, koi bot-detection
+// ka masla nahi hota.
+// ---------------------------------------------------------------------------
+const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
+
+function extractYoutubeIdentifier(url) {
+  // @handle format: youtube.com/@channelname
+  const handleMatch = url.match(/youtube\.com\/@([a-zA-Z0-9_.-]+)/);
+  if (handleMatch) return { type: 'handle', value: handleMatch[1] };
+
+  // /channel/UC... format
+  const channelMatch = url.match(/youtube\.com\/channel\/([a-zA-Z0-9_-]+)/);
+  if (channelMatch) return { type: 'id', value: channelMatch[1] };
+
+  // /c/customname or /user/username format (legacy)
+  const legacyMatch = url.match(/youtube\.com\/(?:c|user)\/([a-zA-Z0-9_-]+)/);
+  if (legacyMatch) return { type: 'handle', value: legacyMatch[1] };
+
+  return null;
+}
+
+async function getYoutubeSubscriberCount(url) {
+  if (!YOUTUBE_API_KEY) {
+    throw new Error('YOUTUBE_API_KEY environment variable set nahi hai');
+  }
+
+  const identifier = extractYoutubeIdentifier(url);
+  if (!identifier) {
+    throw new Error('YouTube link se channel handle/ID nahi mila');
+  }
+
+  let apiUrl;
+  if (identifier.type === 'handle') {
+    apiUrl = `https://www.googleapis.com/youtube/v3/channels?part=statistics&forHandle=${identifier.value}&key=${YOUTUBE_API_KEY}`;
+  } else {
+    apiUrl = `https://www.googleapis.com/youtube/v3/channels?part=statistics&id=${identifier.value}&key=${YOUTUBE_API_KEY}`;
+  }
+
+  const response = await fetch(apiUrl);
+  const data = await response.json();
+
+  if (!data.items || data.items.length === 0) {
+    throw new Error('Channel nahi mila YouTube API se');
+  }
+
+  return parseInt(data.items[0].statistics.subscriberCount, 10);
+}
+
+// ---------------------------------------------------------------------------
 // HELPER: random insaan jaisa delay (bots hamesha same-speed hote hain,
 // asli insaan ki speed random hoti hai)
 // ---------------------------------------------------------------------------
@@ -142,40 +192,46 @@ app.post('/verify-social', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  let browser;
+  let actualCount = 0;
+
   try {
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--disable-blink-features=AutomationControlled', // ye flag chupata hai
-      ],
-    });
-
-    const page = await browser.newPage({
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
-      viewport: { width: 1366, height: 768 },
-      locale: 'en-US',
-      timezoneId: 'Asia/Karachi',
-    });
-
-    // Insaan jaisi thodi delay shuru mein
-    await randomDelay(500, 1500);
-
-    let actualCount = 0;
-
+    // ===== YOUTUBE: Official API use karo, browser ki zaroorat nahi =====
     if (platform === 'youtube') {
-      actualCount = await scrapeYoutube(page, url);
-    } else if (platform === 'tiktok') {
-      actualCount = await scrapeTiktok(page, url);
-    } else if (platform === 'instagram') {
-      actualCount = await scrapeInstagram(page, url);
+      actualCount = await getYoutubeSubscriberCount(url);
     } else {
-      await browser.close();
-      return res.status(400).json({ error: 'Invalid platform' });
-    }
+      // ===== TIKTOK / INSTAGRAM: Headless browser se scrape karo =====
+      let browser;
+      try {
+        browser = await chromium.launch({
+          headless: true,
+          args: ['--disable-blink-features=AutomationControlled'],
+        });
 
-    await browser.close();
+        const page = await browser.newPage({
+          userAgent:
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
+          viewport: { width: 1366, height: 768 },
+          locale: 'en-US',
+          timezoneId: 'Asia/Karachi',
+        });
+
+        await randomDelay(500, 1500);
+
+        if (platform === 'tiktok') {
+          actualCount = await scrapeTiktok(page, url);
+        } else if (platform === 'instagram') {
+          actualCount = await scrapeInstagram(page, url);
+        } else {
+          await browser.close();
+          return res.status(400).json({ error: 'Invalid platform' });
+        }
+
+        await browser.close();
+      } catch (err) {
+        if (browser) await browser.close();
+        throw err;
+      }
+    }
 
     if (actualCount === 0) {
       return res.status(422).json({
@@ -218,7 +274,6 @@ app.post('/verify-social', async (req, res) => {
       promoCode: code,
     });
   } catch (err) {
-    if (browser) await browser.close();
     console.error(err);
     return res.status(500).json({ error: 'Verification failed', details: err.message });
   }
